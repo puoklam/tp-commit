@@ -1,10 +1,13 @@
 package set
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 type Set[T comparable] struct {
 	safe bool
-	mu   sync.RWMutex
+	mu   *sync.RWMutex
 	m    map[T]bool
 }
 
@@ -79,7 +82,7 @@ func (s *Set[T]) For(fn func(el T)) {
 	}
 }
 
-func (s *Set[T]) List() []T {
+func (s Set[T]) Slice() []T {
 	l := make([]T, len(s.m))
 	i := 0
 	for el := range s.m {
@@ -99,8 +102,25 @@ func (s *Set[T]) Clone() *Set[T] {
 	}
 	return &Set[T]{
 		safe: s.safe,
+		mu:   &sync.RWMutex{},
 		m:    m,
 	}
+}
+
+func (s Set[_]) String() string {
+	return fmt.Sprint(s.Slice())
+}
+
+func Equal[T comparable](s1, s2 *Set[T]) bool {
+	if s1.Len() != s2.Len() {
+		return false
+	}
+	for el := range s1.m {
+		if !s2.Has(el) {
+			return false
+		}
+	}
+	return true
 }
 
 type Option[T comparable] interface {
@@ -115,7 +135,8 @@ func (f OptionFunc[T]) Apply(s *Set[T]) {
 
 func New[T comparable](options ...Option[T]) *Set[T] {
 	s := &Set[T]{
-		m: make(map[T]bool),
+		mu: &sync.RWMutex{},
+		m:  make(map[T]bool),
 	}
 	for _, opt := range options {
 		opt.Apply(s)
