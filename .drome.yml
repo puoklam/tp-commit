@@ -1,0 +1,28 @@
+kind: pipeline
+type: docker
+name: default
+
+steps:
+- name: test
+  image: golang:1.20
+  environment:
+    CGO_ENABLED: 0
+    GO111MODULE: on
+  volumes:
+  - name: deps
+    path: /go
+  commands:
+  - go get -d -t ./...
+  # - go build
+  # - go test -cover
+  - go test -v ./...
+  when:
+    branch:
+    - master
+    event:
+    - push
+    - pull_request
+
+volumes:
+- name: deps
+  temp: {}
