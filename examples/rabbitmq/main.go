@@ -28,7 +28,7 @@ func failOnError(err error, msg string) {
 	}
 }
 
-func newNode(ip, key string, receiveFn notify.ReceiveFunc) *node.Node {
+func newNode(ip, key string, detect bool, receiveFn notify.ReceiveFunc) *node.Node {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	failOnError(err, "Failed to connect to RabbitMQ")
 
@@ -40,11 +40,15 @@ func newNode(ip, key string, receiveFn notify.ReceiveFunc) *node.Node {
 		Key:       key,
 		ReceiveFn: receiveFn,
 	}
-	return &node.Node{
+	n := &node.Node{
 		Notifier: mq,
 		Ip:       ip,
-		Timeout:  5 * time.Second,
+		Idle:     5 * time.Second,
 	}
+	if detect {
+		n.Detectors = append(n.Detectors, &node.TimeoutDetector{})
+	}
+	return n
 }
 
 func verifyMsg(msg amqp.Delivery) (body commit.MsgBody, err error) {
@@ -94,11 +98,25 @@ func newReceiveFn(n *node.Node) notify.ReceiveFunc {
 			for _, ip := range p.([]any) {
 				ips = append(ips, ip.(string))
 			}
-			c := n.NewCommit(body.ID, body.Ip, ips)
+			c := n.NewCommit(body.ID, body.Ip, ips, body.Timeout)
+
+			// detect failure
+			for _, d := range n.Detectors {
+				ch := d.Detect(c)
+				go func() {
+					// catch the diff between participants and votes after commit timeout
+					diff := <-ch
+					for _, ip := range diff.([]string) {
+						go n.Abort(context.TODO(), c.ID(), ip)
+					}
+				}()
+			}
 
 			// emit a signal after 1s
 			time.AfterFunc(1*time.Second, func() {
-				n.Done(context.TODO(), c.ID(), true)
+				if n.Ip == "0.0.0.0" {
+					n.Done(context.TODO(), c.ID(), true)
+				}
 			})
 		case commit.TypeResp:
 			c := n.GetCommit(body.ID)
@@ -118,7 +136,8 @@ func main() {
 	ips := make([]string, 0, k)
 
 	for i := 0; i < k; i++ {
-		n := newNode(fmt.Sprintf("%d.%d.%d.%d", i, i, i, i), "node1_signal", nil)
+		// only first node will be attaching a timeout detector
+		n := newNode(fmt.Sprintf("%d.%d.%d.%d", i, i, i, i), "node1_signal", i == 0, nil)
 		defer n.Close()
 
 		nodes = append(nodes, n)
@@ -138,6 +157,6 @@ func main() {
 	cid := commit.CommitID{
 		UUID: uuid.New(),
 	}
-	nodes[0].Prepare(context.TODO(), cid, ips)
+	nodes[0].Prepare(context.TODO(), cid, ips, 3*time.Second)
 	fmt.Println(<-nodes[0].GetCommit(cid).Ok, <-nodes[1].GetCommit(cid).Ok)
 }

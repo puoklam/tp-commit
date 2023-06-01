@@ -22,6 +22,14 @@ var (
 	MsgNotOK SignalPayload = false
 )
 
+type Interface interface {
+	Vote(p string, ok bool)
+	Decided() bool
+	Participants() set.Set[string]
+	Votes() set.Set[string]
+	Close() error
+}
+
 type CommitID struct {
 	uuid.UUID
 }
@@ -43,6 +51,7 @@ type MsgBody struct {
 	Type    SignalType    `json:"type"`
 	ID      CommitID      `json:"commit_id"`
 	Payload SignalPayload `json:"payload"`
+	Timeout time.Duration `json:"timeout"`
 }
 
 type Commit struct {
@@ -53,7 +62,8 @@ type Commit struct {
 	votes *set.Set[string] // votes, slice of ips replied "ok"
 	d     bool             // dicided
 	Ok    chan bool        // able to commit
-	t     *time.Timer      // global timeout timer
+	it    *time.Timer      // idle timeout timer
+	t     time.Duration    // commit timeout duration
 }
 
 func (c *Commit) ID() CommitID {
@@ -75,8 +85,8 @@ func (c *Commit) vote(p string, ok bool) bool {
 		}
 	}
 	c.d = d
-	if c.d && c.t != nil {
-		c.t.Stop()
+	if c.d && c.it != nil {
+		c.it.Stop()
 	}
 	return d
 }
@@ -103,6 +113,19 @@ func (c *Commit) Votes() set.Set[string] {
 	return *c.votes.Clone()
 }
 
+func (c *Commit) StartTimer(idle time.Duration) {
+	if idle > 0 {
+		c.it = time.AfterFunc(idle, func() {
+			c.Ok <- false
+		})
+	}
+}
+
+// Duration implements node.Detector
+func (c *Commit) Duration() time.Duration {
+	return c.t
+}
+
 func (c *Commit) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -110,25 +133,19 @@ func (c *Commit) Close() error {
 	c.votes = nil
 	close(c.Ok)
 	<-c.Ok
-	c.t.Stop()
+	c.it.Stop()
 	return nil
 }
 
 func New(id CommitID, host string, ips []string, timeout time.Duration) *Commit {
 	ps := set.New[string](set.WithElements(ips))
-	c := &Commit{
+	return &Commit{
 		id:    id,
 		host:  host,
 		ps:    ps,
 		votes: set.New[string](),
 		d:     false,
 		Ok:    make(chan bool, 1),
-		t:     nil,
+		t:     timeout,
 	}
-	if timeout > 0 {
-		c.t = time.AfterFunc(timeout, func() {
-			c.Ok <- false
-		})
-	}
-	return c
 }

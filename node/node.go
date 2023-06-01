@@ -12,10 +12,11 @@ import (
 
 type Node struct {
 	notify.Notifier
-	mu      sync.Mutex
-	Ip      string
-	Timeout time.Duration // commit timeout
-	commits map[string]*commit.Commit
+	mu        sync.Mutex
+	Ip        string
+	commits   map[string]*commit.Commit
+	Idle      time.Duration // commit idle timeout
+	Detectors []Detector
 }
 
 func (n *Node) lazyInit() {
@@ -27,9 +28,9 @@ func (n *Node) lazyInit() {
 }
 
 // Prepare implements Coordinator
-func (n *Node) Prepare(ctx context.Context, id commit.CommitID, ips []string) error {
+func (n *Node) Prepare(ctx context.Context, id commit.CommitID, ips []string, timeout time.Duration) error {
 	// regiter commit before broadcasting
-	n.RegisterCommit(commit.New(id, n.Ip, ips, n.Timeout))
+	n.RegisterCommit(commit.New(id, n.Ip, ips, timeout))
 
 	// broadcast
 	body := &commit.MsgBody{
@@ -37,6 +38,7 @@ func (n *Node) Prepare(ctx context.Context, id commit.CommitID, ips []string) er
 		Type:    commit.TypePrepare,
 		ID:      id,
 		Payload: ips,
+		Timeout: timeout,
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -45,10 +47,28 @@ func (n *Node) Prepare(ctx context.Context, id commit.CommitID, ips []string) er
 	return n.Emit(ctx, b)
 }
 
-func (n *Node) NewCommit(id commit.CommitID, host string, ips []string) *commit.Commit {
-	c := commit.New(id, host, ips, n.Timeout)
-	n.RegisterCommit(c)
-	return c
+// TODO: abort function
+// abort
+func (n *Node) Abort(ctx context.Context, id commit.CommitID, ip string) error {
+	body := &commit.MsgBody{
+		Ip:      ip,
+		Type:    commit.TypeResp,
+		ID:      id,
+		Payload: false,
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return n.Emit(ctx, b)
+}
+
+func (n *Node) NewCommit(id commit.CommitID, host string, ips []string, timeout time.Duration) *commit.Commit {
+	c := commit.New(id, host, ips, timeout)
+	if n.RegisterCommit(c) {
+		return c
+	}
+	return n.GetCommit(id)
 }
 
 func (n *Node) GetCommit(id commit.CommitID) *commit.Commit {
@@ -58,15 +78,17 @@ func (n *Node) GetCommit(id commit.CommitID) *commit.Commit {
 	return n.commits[id.String()]
 }
 
-func (n *Node) RegisterCommit(c *commit.Commit) {
+func (n *Node) RegisterCommit(c *commit.Commit) bool {
 	n.lazyInit()
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	id := c.ID().String()
 	if n.commits[id] != nil {
-		return
+		return false
 	}
+	c.StartTimer(n.Idle)
 	n.commits[id] = c
+	return true
 }
 
 func (n *Node) Done(ctx context.Context, id commit.CommitID, ok bool) error {
@@ -81,10 +103,6 @@ func (n *Node) Done(ctx context.Context, id commit.CommitID, ok bool) error {
 		return err
 	}
 	return n.Emit(ctx, b)
-}
-
-func (n *Node) Detect() {
-
 }
 
 func (n *Node) CloseCommit(id commit.CommitID) error {

@@ -37,16 +37,18 @@ func (s *Set[_]) Len() int {
 	return len(s.m)
 }
 
-func (s *Set[T]) Has(el T) bool {
-	fn := s.prepare(false)
-	defer fn()
-
+func (s *Set[T]) has(el T) bool {
 	return s.m[el]
 }
 
-func (s *Set[T]) Add(el T) bool {
-	fn := s.prepare(true)
+func (s *Set[T]) Has(el T) bool {
+	fn := s.prepare(false)
 	defer fn()
+	return s.has(el)
+}
+
+func (s *Set[T]) Add(el T) bool {
+	defer s.prepare(true)()
 
 	if s.m[el] {
 		return false
@@ -56,8 +58,7 @@ func (s *Set[T]) Add(el T) bool {
 }
 
 func (s *Set[T]) Remove(el T) bool {
-	fn := s.prepare(true)
-	defer fn()
+	defer s.prepare(true)()
 
 	if !s.m[el] {
 		return false
@@ -67,15 +68,13 @@ func (s *Set[T]) Remove(el T) bool {
 }
 
 func (s *Set[T]) Clear() {
-	fn := s.prepare(true)
-	defer fn()
+	defer s.prepare(true)()
 
 	s.m = map[T]bool{}
 }
 
 func (s *Set[T]) For(fn func(el T)) {
-	f := s.prepare(true)
-	defer f()
+	defer s.prepare(true)()
 
 	for el := range s.m {
 		fn(el)
@@ -90,6 +89,18 @@ func (s Set[T]) Slice() []T {
 		i++
 	}
 	return l
+}
+
+func (s Set[T]) Diff(s1 Set[T]) []T {
+	defer s.prepare(false)()
+	defer s1.prepare(false)()
+	sl := make([]T, 0)
+	for el := range s.m {
+		if !s1.has(el) {
+			sl = append(sl, el)
+		}
+	}
+	return sl
 }
 
 func (s *Set[T]) Clone() *Set[T] {
