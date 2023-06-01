@@ -138,12 +138,12 @@ func (c *Commit) Close() error {
 }
 
 func New(id CommitID, host string, ips []string, timeout time.Duration) *Commit {
-	ps := set.New[string](set.WithElements(ips))
+	ps := set.New[string](set.WithLock[string](), set.WithElements(ips))
 	return &Commit{
 		id:    id,
 		host:  host,
 		ps:    ps,
-		votes: set.New[string](),
+		votes: set.New[string](set.WithLock[string]()),
 		d:     false,
 		Ok:    make(chan bool, 1),
 		t:     timeout,
