@@ -47,7 +47,6 @@ func (n *Node) Prepare(ctx context.Context, id commit.CommitID, ips []string, ti
 	return n.Emit(ctx, b)
 }
 
-// TODO: abort function
 // abort
 func (n *Node) Abort(ctx context.Context, id commit.CommitID, ip string) error {
 	body := &commit.MsgBody{
