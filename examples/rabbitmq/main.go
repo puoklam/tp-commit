@@ -114,9 +114,11 @@ func newReceiveFn(n *node.Node) notify.ReceiveFunc {
 
 			// emit a signal after 1s
 			time.AfterFunc(1*time.Second, func() {
-				if n.Ip == "0.0.0.0" {
-					n.Done(context.TODO(), c.ID(), true)
-				}
+				n.Done(context.TODO(), c.ID(), true)
+				// testing timeout detector
+				// if n.Ip == "0.0.0.0" {
+				// 	n.Done(context.TODO(), c.ID(), true)
+				// }
 			})
 		case commit.TypeResp:
 			c := n.GetCommit(body.ID)
