@@ -1,6 +1,7 @@
 package node
 
 import (
+	"sync"
 	"time"
 
 	commit "github.com/puoklam/tp-commit"
@@ -14,7 +15,10 @@ type Timeout interface {
 	Duration() time.Duration
 }
 
-type TimeoutDetector struct{}
+type TimeoutDetector struct {
+	mu     sync.Mutex
+	timers []*time.Timer
+}
 
 // Detect implements Detector
 func (td *TimeoutDetector) Detect(c commit.Interface) <-chan any {
@@ -23,10 +27,22 @@ func (td *TimeoutDetector) Detect(c commit.Interface) <-chan any {
 	if !ok {
 		return nil
 	}
-	time.AfterFunc(t.Duration(), func() {
+	timer := time.AfterFunc(t.Duration(), func() {
 		// not voted
 		diff := c.Participants().Diff(c.Votes())
 		ch <- diff
 	})
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	td.timers = append(td.timers, timer)
 	return ch
+}
+
+func (td *TimeoutDetector) Close() error {
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	for _, t := range td.timers {
+		t.Stop()
+	}
+	return nil
 }

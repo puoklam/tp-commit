@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"sync"
 	"time"
 
@@ -118,6 +119,11 @@ func (n *Node) CloseCommit(id commit.CommitID) error {
 func (n *Node) Close() error {
 	for _, c := range n.commits {
 		n.CloseCommit(c.ID())
+	}
+	for _, d := range n.Detectors {
+		if closer, ok := d.(io.Closer); ok {
+			closer.Close()
+		}
 	}
 	return n.Notifier.Close()
 }
